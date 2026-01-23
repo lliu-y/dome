@@ -1,0 +1,116 @@
+# A0-Baseline: 原始BBDM + 线稿作为条件（无参考图，无边缘损失）
+# 用于消融实验基准对照
+
+runner: "BBDMRunner"
+
+training:
+  n_epochs: 100
+  n_steps: 400000
+  save_interval: 10
+  sample_interval: 2
+  validation_interval: 1      # 每个epoch验证一次，配合早停机制
+  accumulate_grad_batches: 2
+  
+  # 早停配置
+  early_stopping:
+    enabled: True               # 是否启用早停
+    patience: 10                 # 验证损失连续无改善的容忍轮数
+    min_delta: 0.0               # 判定为"有改善"的最小阈值
+
+testing:
+  clip_denoised: True
+  sample_num: 1
+
+data:
+  dataset_name: 'anime_colorization'
+  dataset_type: 'anime_colorization'
+  dataset_config:
+    dataset_path: 'dataset'    # 数据集根目录
+    image_size: 256
+    channels: 3
+    to_normal: True               # 归一化到 [-1, 1]
+    flip: True                    # 训练时随机翻转
+    use_tps: False                # A0: 不使用TPS变形
+    tps_scale: 0.2
+  train:
+    batch_size: 1  # 8
+    shuffle: True
+  val:
+    batch_size: 1  # 4
+    shuffle: True
+  test:
+    batch_size: 1  # 4
+
+model:
+  model_name: "A0-Baseline"       # 结果保存路径的一部分
+  model_type: "BBDM"              # 指定使用像素空间BBDM
+  latent_before_quant_conv: False
+  normalize_latent: False
+  only_load_latent_mean_std: False
+  # model_load_path:              # 模型checkpoint路径
+  # optim_sche_load_path:         # 优化器调度器checkpoint路径
+
+  EMA:
+    use_ema: True
+    ema_decay: 0.995
+    update_ema_interval: 8        # step
+    start_ema_step: 30000
+
+  # 条件阶段参数 (用于SpatialRescaler)
+  CondStageParams:
+    n_stages: 2
+    in_channels: 3
+    out_channels: 3
+
+  BB:
+    optimizer:
+      weight_decay: 0.000
+      optimizer: 'Adam'
+      lr: 1.e-4
+      beta1: 0.9
+
+    lr_scheduler:
+      factor: 0.5
+      patience: 3000
+      threshold: 0.0001
+      cooldown: 3000
+      min_lr: 5.e-7
+
+    params:
+      mt_type: 'linear'           # m_t 调度方式 {'linear', 'sin'}
+      objective: 'grad'           # 预测目标 {'grad', 'noise', 'ysubx'}
+      loss_type: 'l1'             # 损失类型 {'l1', 'l2'}
+
+      skip_sample: True           # 启用跳步采样
+      sample_type: 'linear'       # 采样类型 {'linear', 'sin'}
+      sample_step: 200            # 推理步数
+
+      num_timesteps: 1000         # 训练步数 T
+      eta: 1.0                    # DDIM采样随机性
+      max_var: 1.0                # 最大方差系数 s
+
+      # UNet参数 (注意: 必须嵌套在 BB.params 下)
+      UNetParams:
+        image_size: 256
+        in_channels: 6            # x(3) + x_cond(3) 拼接后的通道数
+        model_channels: 128
+        out_channels: 3
+        num_res_blocks: 2
+        attention_resolutions: !!python/tuple
+          - 32
+          - 16
+          - 8
+        channel_mult: !!python/tuple
+          - 1
+          - 2
+          - 4
+          - 8
+        conv_resample: True
+        dims: 2
+        num_heads: 8
+        num_head_channels: 64
+        use_scale_shift_norm: True
+        resblock_updown: True
+        use_spatial_transformer: False
+        context_dim:
+        condition_key: "SpatialRescaler"  # 条件注入方式 {"SpatialRescaler", "first_stage", "nocond"}
