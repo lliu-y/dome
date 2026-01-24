@@ -96,11 +96,41 @@ class BBDMRunner(DiffusionBaseRunner):
 
     def initialize_optimizer_scheduler(self, net, config):
         optimizer = get_optimizer(config.model.BB.optimizer, net.get_parameters())
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer,
-                                                               mode='min',
-                                                               threshold_mode='rel',
-                                                               **vars(config.model.BB.lr_scheduler)
-)
+        
+        lr_config = config.model.BB.lr_scheduler
+        scheduler_type = getattr(lr_config, 'type', 'ReduceLROnPlateau')
+        
+        if scheduler_type == 'CosineAnnealingLR':
+            T_max = getattr(lr_config, 'T_max', -1)
+            eta_min = getattr(lr_config, 'eta_min', 5e-7)
+            
+            if T_max == -1:
+                # 延迟初始化：返回配置信息，在 train() 中计算实际 T_max 后创建调度器
+                # 使用占位符标记需要延迟初始化
+                scheduler = {
+                    '_deferred_': True,
+                    'type': 'CosineAnnealingLR',
+                    'optimizer': optimizer,
+                    'eta_min': eta_min
+                }
+            else:
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer=optimizer,
+                    T_max=T_max,
+                    eta_min=eta_min
+                )
+        else:
+            # 默认使用 ReduceLROnPlateau（向后兼容）
+            # 过滤掉 type 字段，只保留 ReduceLROnPlateau 支持的参数
+            plateau_params = {k: v for k, v in vars(lr_config).items() 
+                              if k not in ['type', 'T_max', 'eta_min']}
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer=optimizer,
+                mode='min',
+                threshold_mode='rel',
+                **plateau_params
+            )
+        
         return [optimizer], [scheduler]
 
     @torch.no_grad()

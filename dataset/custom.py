@@ -235,6 +235,7 @@ class AnimeColorizationDataset(Dataset):
         self.stage = stage
         self.image_size = (dataset_config.image_size, dataset_config.image_size)
         self.to_normal = dataset_config.to_normal
+        
         self.flip = dataset_config.flip if stage == 'train' else False
         
         # 路径设置

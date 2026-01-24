@@ -451,6 +451,23 @@ class BaseRunner(ABC):
         start_epoch = self.global_epoch
         self.logger(f"start training {self.config.model.model_name} on {self.config.data.dataset_name}, {len(train_loader)} iters per epoch")
 
+        # 延迟初始化调度器（如果需要）
+        # 检查是否有调度器需要延迟初始化（T_max=-1 的情况）
+        if self.scheduler is not None:
+            for i, sched in enumerate(self.scheduler):
+                if isinstance(sched, dict) and sched.get('_deferred_', False):
+                    # 计算实际的 T_max = epochs × steps_per_epoch / accumulate_grad_batches
+                    accumulate = getattr(self.config.training, 'accumulate_grad_batches', 1)
+                    T_max = epoch_length * self.config.training.n_epochs // accumulate
+                    self.logger(f"Deferred scheduler initialization: T_max = {epoch_length} * {self.config.training.n_epochs} // {accumulate} = {T_max}")
+                    
+                    # 创建实际的调度器
+                    self.scheduler[i] = torch.optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer=sched['optimizer'],
+                        T_max=T_max,
+                        eta_min=sched.get('eta_min', 5e-7)
+                    )
+
         try:
             accumulate_grad_batches = self.config.training.accumulate_grad_batches
             for epoch in range(start_epoch, self.config.training.n_epochs):
@@ -483,7 +500,13 @@ class BaseRunner(ABC):
                             self.optimizer[i].step()
                             self.optimizer[i].zero_grad()
                             if self.scheduler is not None:
-                                self.scheduler[i].step(loss)
+                                # 根据调度器类型决定 step() 调用方式
+                                if isinstance(self.scheduler[i], torch.optim.lr_scheduler.ReduceLROnPlateau):
+                                    # ReduceLROnPlateau 需要传入 metric (loss)
+                                    self.scheduler[i].step(loss)
+                                else:
+                                    # CosineAnnealingLR 等其他调度器不需要参数
+                                    self.scheduler[i].step()
                         if self.config.training.use_DDP:
                             dist.reduce(loss, dst=0, op=dist.ReduceOp.SUM)
                         losses.append(loss.detach().mean())
