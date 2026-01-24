@@ -8,13 +8,13 @@ training:
   n_steps: 400000
   save_interval: 10
   sample_interval: 2
-  validation_interval: 1      # 每个epoch验证一次，配合早停机制
-  accumulate_grad_batches: 2
+  validation_interval: 4      # 每个epoch验证一次，配合早停机制
+  accumulate_grad_batches: 4  # 梯度累积步数
   
   # 早停配置
   early_stopping:
     enabled: True               # 是否启用早停
-    patience: 10                 # 验证损失连续无改善的容忍轮数
+    patience: 3                 # 验证损失连续无改善的容忍轮数
     min_delta: 0.0               # 判定为"有改善"的最小阈值
 
 testing:
@@ -29,17 +29,17 @@ data:
     image_size: 256
     channels: 3
     to_normal: True               # 归一化到 [-1, 1]
-    flip: True                    # 训练时随机翻转
+    flip: False                    # 训练时随机翻转
     use_tps: False                # A0: 不使用TPS变形
     tps_scale: 0.2
   train:
-    batch_size: 1  # 8
+    batch_size: 4  
     shuffle: True
   val:
-    batch_size: 1  # 4
+    batch_size: 4 
     shuffle: True
   test:
-    batch_size: 1  # 4
+    batch_size: 4 
 
 model:
   model_name: "A0-Baseline"       # 结果保存路径的一部分
@@ -70,11 +70,9 @@ model:
       beta1: 0.9
 
     lr_scheduler:
-      factor: 0.5
-      patience: 3000
-      threshold: 0.0001
-      cooldown: 3000
-      min_lr: 5.e-7
+      type: 'CosineAnnealingLR'   # 调度器类型: 'CosineAnnealingLR' 或 'ReduceLROnPlateau'
+      T_max: -1                    # -1 表示自动计算 = epochs × steps_per_epoch / accumulate_grad_batches
+      eta_min: 5.e-7               # 最小学习率
 
     params:
       mt_type: 'linear'           # m_t 调度方式 {'linear', 'sin'}
