@@ -474,6 +474,10 @@ class BaseRunner(ABC):
                 if self.global_step > self.config.training.n_steps:
                     break
 
+                # 每个 epoch 开始前清理显存碎片，防止长时间训练导致显存碎片化
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()  # 确保之前的操作都完成
+
                 if self.config.training.use_DDP:
                     train_sampler.set_epoch(epoch)
                     val_sampler.set_epoch(epoch)
