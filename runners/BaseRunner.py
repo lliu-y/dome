@@ -184,7 +184,12 @@ class BaseRunner(ABC):
             self.global_step = model_states['step']
 
             # load model
-            self.net.load_state_dict(model_states['model'])
+            try:
+                self.net.load_state_dict(model_states['model'])
+            except RuntimeError as err:
+                self.logger(f"load_state_dict(strict=True) failed: {err}. Retrying with strict=False")
+                self.net.load_state_dict(model_states['model'], strict=False)
+                self.logger("Loaded model with strict=False (some keys missing or unexpected)")
 
             # load ema
             if self.use_ema:
@@ -712,12 +717,12 @@ class BaseRunner(ABC):
                             torch.save(optimizer_scheduler_states,
                                        os.path.join(self.config.result.ckpt_path,
                                                     f'latest_optim_sche_{epoch + 1}.pth'))
-                            torch.save(model_states,
-                                       os.path.join(self.config.result.ckpt_path,
-                                                    f'last_model.pth'))
-                            torch.save(optimizer_scheduler_states,
-                                       os.path.join(self.config.result.ckpt_path,
-                                                    f'last_optim_sche.pth'))
+                            # torch.save(model_states,
+                            #            os.path.join(self.config.result.ckpt_path,
+                            #                         f'last_model.pth'))
+                            # torch.save(optimizer_scheduler_states,
+                            #            os.path.join(self.config.result.ckpt_path,
+                            #                         f'last_optim_sche.pth'))
 
                             # save top_k checkpoints
                             model_ckpt_name = f'top_model_epoch_{epoch + 1}.pth'
@@ -777,22 +782,103 @@ class BaseRunner(ABC):
                     
         except BaseException as e:
             if self.is_main_process:
-                print("exception save model start....")
-                print(self.__class__.__name__)
-                model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='exception')
-                torch.save(model_states,
-                           os.path.join(self.config.result.ckpt_path, f'last_model.pth'))
-                torch.save(optimizer_scheduler_states,
-                           os.path.join(self.config.result.ckpt_path, f'last_optim_sche.pth'))
-
-                print("exception save model success!")
-
-            print('str(Exception):\t', str(Exception))
-            print('str(e):\t\t', str(e))
-            print('repr(e):\t', repr(e))
-            print('traceback.print_exc():')
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                prefix = f'exception_e{self.global_epoch}_s{self.global_step}_{timestamp}'
+                
+                print(f"\n{'='*80}")
+                print(f"🚨 EXCEPTION at epoch {self.global_epoch}, step {self.global_step}")
+                print(f"Type: {type(e).__name__} | Message: {str(e)[:100]}")
+                print(f"{'='*80}\n")
+                
+                # 策略：CUDA错误用CPU回退，其他错误用正常保存
+                is_cuda_error = 'CUDA' in str(e) or 'cuda' in str(e).lower()
+                save_success = False
+                
+                try:
+                    if is_cuda_error:
+                        print("⚠️  CUDA error → Using CPU fallback...")
+                        # CPU回退：逐个参数拷贝到CPU
+                        net = self.net.module if self.config.training.use_DDP else self.net
+                        cpu_state = {}
+                        for name, param in net.named_parameters():
+                            try:
+                                cpu_state[name] = param.detach().cpu()
+                            except:
+                                pass  # 跳过损坏的参数
+                        for name, buf in net.named_buffers():
+                            try:
+                                cpu_state[name] = buf.detach().cpu()
+                            except:
+                                pass
+                        
+                        model_states = {
+                            'model': cpu_state,
+                            'epoch': self.global_epoch,
+                            'step': self.global_step,
+                        }
+                        
+                        # 尝试保存EMA
+                        if self.use_ema:
+                            try:
+                                model_states['ema'] = {k: v.cpu() for k, v in self.ema.shadow.items()}
+                            except:
+                                pass
+                        
+                        # 尝试保存优化器（可能失败，不强求）
+                        try:
+                            opt_states = []
+                            for opt in self.optimizer:
+                                opt_dict = opt.state_dict()
+                                cpu_opt = {'param_groups': opt_dict['param_groups'], 'state': {}}
+                                for k, v in opt_dict['state'].items():
+                                    cpu_opt['state'][k] = {kk: vv.cpu() if isinstance(vv, torch.Tensor) else vv 
+                                                           for kk, vv in v.items()}
+                                opt_states.append(cpu_opt)
+                            
+                            sched_states = [s.state_dict() if not isinstance(s, dict) else s for s in self.scheduler]
+                            optimizer_scheduler_states = {'optimizer': opt_states, 'scheduler': sched_states}
+                        except:
+                            optimizer_scheduler_states = None
+                            
+                    else:
+                        print("💾 Normal exception save...")
+                        model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='exception')
+                    
+                    # 保存模型
+                    torch.save(model_states, os.path.join(self.config.result.ckpt_path, f'{prefix}.pth'))
+                    torch.save(model_states, os.path.join(self.config.result.ckpt_path, 'last_model.pth'))
+                    
+                    # 保存优化器（如果有）
+                    if optimizer_scheduler_states:
+                        torch.save(optimizer_scheduler_states, os.path.join(self.config.result.ckpt_path, f'{prefix}_optim.pth'))
+                        torch.save(optimizer_scheduler_states, os.path.join(self.config.result.ckpt_path, 'last_optim_sche.pth'))
+                    
+                    print(f"✅ Saved: {prefix}.pth")
+                    save_success = True
+                    
+                except Exception as save_err:
+                    print(f"❌ Save failed: {save_err}")
+                
+                # 保存错误日志
+                try:
+                    with open(os.path.join(self.config.result.ckpt_path, f'{prefix}_error.log'), 'w') as f:
+                        f.write(f"Epoch: {self.global_epoch}, Step: {self.global_step}\n")
+                        f.write(f"Error: {type(e).__name__}: {str(e)}\n\n")
+                        f.write(traceback.format_exc())
+                except:
+                    pass
+                
+                print(f"{'='*80}")
+                if save_success:
+                    print(f"Resume: model_load_path: results/.../checkpoint/{prefix}.pth")
+                else:
+                    print(f"⚠️  Use last checkpoint before epoch {self.global_epoch}")
+                print(f"{'='*80}\n")
+            
+            # 打印错误
+            print(f'\n{type(e).__name__}: {str(e)}')
             traceback.print_exc()
-            print('traceback.format_exc():\n%s' % traceback.format_exc())
 
     @torch.no_grad()
     def test(self):
