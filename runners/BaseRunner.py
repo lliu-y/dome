@@ -782,8 +782,7 @@ class BaseRunner(ABC):
                     
         except BaseException as e:
             if self.is_main_process:
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 prefix = f'exception_e{self.global_epoch}_s{self.global_step}_{timestamp}'
                 
                 print(f"\n{'='*80}")
