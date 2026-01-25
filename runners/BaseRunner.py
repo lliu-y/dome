@@ -157,12 +157,41 @@ class BaseRunner(ABC):
                         self.optimizer[i].load_state_dict(optimizer_scheduler_states['optimizer'][i])
 
                     if self.scheduler is not None:
-                        for i in range(len(self.optimizer)):
-                            # 跳过延迟初始化的scheduler（dict占位符）
-                            if isinstance(self.scheduler[i], dict) and self.scheduler[i].get('_deferred_'):
-                                self.logger(f"Skipping scheduler[{i}] state loading (deferred initialization)")
+                        for i in range(len(self.scheduler)):
+                            sched = self.scheduler[i]
+                            saved_state = optimizer_scheduler_states['scheduler'][i]
+                            
+                            # 情况1: 当前是延迟初始化（字典），但保存的是真实状态
+                            if isinstance(sched, dict) and sched.get('_deferred_', False):
+                                if not (isinstance(saved_state, dict) and saved_state.get('_deferred_', False)):
+                                    # 保存的是真实调度器状态，需要立即创建并加载
+                                    self.logger(f"Detected real scheduler state for deferred scheduler[{i}], creating and loading...")
+                                    
+                                    # 从保存的状态中获取 T_max（CosineAnnealingLR的状态包含T_max）
+                                    if sched.get('type') == 'CosineAnnealingLR' and 'T_max' in saved_state:
+                                        import torch.optim.lr_scheduler
+                                        real_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                                            optimizer=sched['optimizer'],
+                                            T_max=saved_state['T_max'],
+                                            eta_min=sched.get('eta_min', 5e-7)
+                                        )
+                                        real_scheduler.load_state_dict(saved_state)
+                                        self.scheduler[i] = real_scheduler
+                                        self.logger(f"Successfully loaded scheduler[{i}] state (T_max={saved_state['T_max']})")
+                                    else:
+                                        self.logger(f"Cannot create scheduler[{i}] from saved state, will initialize in train()")
+                                else:
+                                    # 保存的也是延迟初始化标记
+                                    self.logger(f"Both current and saved scheduler[{i}] are deferred, will initialize in train()")
                                 continue
-                            self.scheduler[i].load_state_dict(optimizer_scheduler_states['scheduler'][i])
+                            
+                            # 情况2: 保存时是延迟初始化，当前是真实调度器
+                            if isinstance(saved_state, dict) and saved_state.get('_deferred_', False):
+                                self.logger(f"Saved scheduler[{i}] was deferred, skipping state load")
+                                continue
+                            
+                            # 情况3: 正常调度器，加载状态
+                            sched.load_state_dict(saved_state)
         return model_states
 
     def _check_early_stopping(self, val_loss, epoch):
@@ -185,15 +214,25 @@ class BaseRunner(ABC):
             self.best_val_loss = val_loss
             self.patience_counter = 0
             
-            # Save best model
+            # Save the best model and optimizer
             if self.is_main_process:
-                self.best_model_path = os.path.join(self.config.result.ckpt_path, 'early_stop_best_model.pth')
-                model_states, _ = self.get_checkpoint_states(stage='epoch_end')
+                self.best_model_path = os.path.join(self.config.result.ckpt_path, 'early_stop_model.pth')
+                model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='epoch_end')
                 model_states['best_val_loss'] = self.best_val_loss
                 model_states['patience_counter'] = self.patience_counter
                 model_states['best_model_path'] = self.best_model_path
+                
+                # Save model
                 torch.save(model_states, self.best_model_path)
+                
+                # Save optimizer and scheduler
+                best_optim_sche_path = os.path.join(self.config.result.ckpt_path, 'early_stop_optim_sche.pth')
+                    
+                torch.save(optimizer_scheduler_states, best_optim_sche_path)
+                
                 self.logger(f"[Early Stopping] New best model saved: val_loss={val_loss:.6f} (epoch {epoch + 1})")
+                self.logger(f"  - Model: {self.best_model_path}")
+                self.logger(f"  - Optimizer: {best_optim_sche_path}")
         else:
             # No improvement: increment counter
             self.patience_counter += 1
@@ -213,11 +252,17 @@ class BaseRunner(ABC):
 
         scheduler_state = []
         for i in range(len(self.scheduler)):
-            # 跳过延迟初始化的scheduler（dict占位符）
-            if isinstance(self.scheduler[i], dict) and self.scheduler[i].get('_deferred_'):
-                scheduler_state.append({})  # 保存空dict占位
+            sched = self.scheduler[i]
+            # 处理延迟初始化的调度器（字典类型）
+            if isinstance(sched, dict) and sched.get('_deferred_', False):
+                # 保存延迟初始化标记，以便恢复时重新创建
+                scheduler_state.append({
+                    '_deferred_': True, 
+                    'type': sched.get('type'), 
+                    'eta_min': sched.get('eta_min')
+                })
             else:
-                scheduler_state.append(self.scheduler[i].state_dict())
+                scheduler_state.append(sched.state_dict())
 
         optimizer_scheduler_states = {
             'optimizer': optimizer_state,
@@ -660,7 +705,7 @@ class BaseRunner(ABC):
                     self.logger("[Early Stopping] Test completed.")
                     
         except BaseException as e:
-            if self.is_main_process == 0:
+            if self.is_main_process:
                 print("exception save model start....")
                 print(self.__class__.__name__)
                 model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='exception')

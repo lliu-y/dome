@@ -6,7 +6,7 @@ runner: "BBDMRunner"
 training:
   n_epochs: 100
   n_steps: 400000
-  save_interval: 10
+  save_interval: 5
   sample_interval: 2
   validation_interval: 4      # 每个epoch验证一次，配合早停机制
   accumulate_grad_batches: 4  # 梯度累积步数
