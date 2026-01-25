@@ -124,6 +124,55 @@ class BaseRunner(ABC):
             optimizer, scheduler = self.initialize_optimizer_scheduler(net, config)
         return net, optimizer, scheduler
 
+    def get_current_lr(self, optimizer_idx=0):
+        """获取指定optimizer的当前学习率，兼容延迟初始化scheduler"""
+        if self.scheduler is None or optimizer_idx >= len(self.scheduler):
+            return None
+        
+        sched = self.scheduler[optimizer_idx]
+        
+        # 延迟初始化（字典）：返回初始学习率
+        if isinstance(sched, dict) and sched.get('_deferred_', False):
+            optimizer = sched.get('optimizer')
+            if optimizer:
+                return optimizer.param_groups[0]['lr']
+            return None
+        
+        # 真实调度器：使用 get_last_lr()
+        try:
+            return sched.get_last_lr()[0]
+        except (AttributeError, IndexError):
+            # 回退方案：从 optimizer 直接获取
+            if optimizer_idx < len(self.optimizer):
+                return self.optimizer[optimizer_idx].param_groups[0]['lr']
+        return None
+    
+    def log_learning_rates(self, prefix=""):
+        """打印所有optimizer的学习率，仅在主进程打印"""
+        if not self.is_main_process or self.optimizer is None:
+            return
+        
+        lr_parts = []
+        for i in range(len(self.optimizer)):
+            lr = self.get_current_lr(i)
+            if lr is not None:
+                # 检查是否为延迟初始化
+                is_deferred = (self.scheduler and i < len(self.scheduler) and 
+                               isinstance(self.scheduler[i], dict) and 
+                               self.scheduler[i].get('_deferred_', False))
+                lr_str = f"{lr:.2e}" + (" (初始值)" if is_deferred else "")
+                
+                # 单个optimizer时简化显示
+                if len(self.optimizer) == 1:
+                    lr_parts.append(f"LR: {lr_str}")
+                else:
+                    lr_parts.append(f"Optimizer[{i}] LR: {lr_str}")
+            else:
+                lr_parts.append(f"Optimizer[{i}] LR: 未初始化" if len(self.optimizer) > 1 else "LR: 未初始化")
+        
+        lr_info = " | ".join(lr_parts)
+        self.logger(f"{prefix} {lr_info}")
+
     # load model, EMA, optimizer, scheduler from checkpoint
     def load_model_from_checkpoint(self):
         model_states = None
@@ -169,7 +218,6 @@ class BaseRunner(ABC):
                                     
                                     # 从保存的状态中获取 T_max（CosineAnnealingLR的状态包含T_max）
                                     if sched.get('type') == 'CosineAnnealingLR' and 'T_max' in saved_state:
-                                        import torch.optim.lr_scheduler
                                         real_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                                             optimizer=sched['optimizer'],
                                             T_max=saved_state['T_max'],
@@ -192,6 +240,11 @@ class BaseRunner(ABC):
                             
                             # 情况3: 正常调度器，加载状态
                             sched.load_state_dict(saved_state)
+        
+        # 断点恢复后显示学习率
+        if model_states is not None and self.config.args.train:
+            self.log_learning_rates(prefix=f"断点恢复 (Epoch {self.global_epoch}, Step {self.global_step})")
+        
         return model_states
 
     def _check_early_stopping(self, val_loss, epoch):
@@ -503,6 +556,9 @@ class BaseRunner(ABC):
         epoch_length = len(train_loader)
         start_epoch = self.global_epoch
         self.logger(f"start training {self.config.model.model_name} on {self.config.data.dataset_name}, {len(train_loader)} iters per epoch")
+        
+        # 训练开始时显示学习率
+        self.log_learning_rates(prefix="训练开始")
 
         # 延迟初始化调度器（如果需要）
         # 检查是否有调度器需要延迟初始化（T_max=-1 的情况）
@@ -520,6 +576,7 @@ class BaseRunner(ABC):
                         T_max=T_max,
                         eta_min=sched.get('eta_min', 5e-7)
                     )
+                    self.log_learning_rates(prefix=f"Scheduler[{i}] 初始化完成")
 
         try:
             accumulate_grad_batches = self.config.training.accumulate_grad_batches
@@ -530,6 +587,9 @@ class BaseRunner(ABC):
                 # 每个 epoch 开始前清理显存碎片，防止长时间训练导致显存碎片化
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()  # 确保之前的操作都完成
+                
+                # Epoch开始时显示学习率
+                self.log_learning_rates(prefix=f"Epoch {epoch + 1}/{self.config.training.n_epochs} 开始")
 
                 if self.config.training.use_DDP:
                     train_sampler.set_epoch(epoch)
@@ -557,10 +617,18 @@ class BaseRunner(ABC):
                             self.optimizer[i].step()
                             self.optimizer[i].zero_grad()
                             if self.scheduler is not None:
+                                # 记录旧学习率（用于ReduceLROnPlateau变化检测）
+                                old_lr = self.get_current_lr(i)
+                                
                                 # 根据调度器类型决定 step() 调用方式
                                 if isinstance(self.scheduler[i], torch.optim.lr_scheduler.ReduceLROnPlateau):
                                     # ReduceLROnPlateau 需要传入 metric (loss)
                                     self.scheduler[i].step(loss)
+                                    # 仅在学习率变化时打印
+                                    new_lr = self.get_current_lr(i)
+                                    if old_lr is not None and new_lr is not None and abs(old_lr - new_lr) > 1e-10:
+                                        if self.is_main_process:
+                                            self.logger(f"学习率自适应调整: {old_lr:.2e} → {new_lr:.2e} (loss={loss:.6f})")
                                 else:
                                     # CosineAnnealingLR 等其他调度器不需要参数
                                     self.scheduler[i].step()
@@ -603,6 +671,9 @@ class BaseRunner(ABC):
                 end_time = time.time()
                 elapsed_rounded = int(round((end_time-start_time)))
                 self.logger("training time: " + str(datetime.timedelta(seconds=elapsed_rounded)))
+                
+                # Epoch结束时显示学习率
+                self.log_learning_rates(prefix=f"Epoch {epoch + 1} 结束")
 
                 # validation
                 if (epoch + 1) % self.config.training.validation_interval == 0 or (
