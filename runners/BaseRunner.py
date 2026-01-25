@@ -158,6 +158,10 @@ class BaseRunner(ABC):
 
                     if self.scheduler is not None:
                         for i in range(len(self.optimizer)):
+                            # 跳过延迟初始化的scheduler（dict占位符）
+                            if isinstance(self.scheduler[i], dict) and self.scheduler[i].get('_deferred_'):
+                                self.logger(f"Skipping scheduler[{i}] state loading (deferred initialization)")
+                                continue
                             self.scheduler[i].load_state_dict(optimizer_scheduler_states['scheduler'][i])
         return model_states
 
@@ -209,7 +213,11 @@ class BaseRunner(ABC):
 
         scheduler_state = []
         for i in range(len(self.scheduler)):
-            scheduler_state.append(self.scheduler[i].state_dict())
+            # 跳过延迟初始化的scheduler（dict占位符）
+            if isinstance(self.scheduler[i], dict) and self.scheduler[i].get('_deferred_'):
+                scheduler_state.append({})  # 保存空dict占位
+            else:
+                scheduler_state.append(self.scheduler[i].state_dict())
 
         optimizer_scheduler_states = {
             'optimizer': optimizer_state,
