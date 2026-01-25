@@ -5,6 +5,7 @@
 
 ## 核心架构速查
 
+
 ```
 BrownianBridgeModel          ← 像素空间 BBDM (当前使用)
     └── LatentBrownianBridgeModel  ← 潜在空间 (继承自上面，使用 VQGAN)

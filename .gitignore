@@ -42,7 +42,6 @@ runs/
 
 # OS
 # .gitignore
-.github/
 *.tmp
 *.bak
 
