@@ -1,0 +1,56 @@
+# Dataset and data
+dataset/*
+!dataset/*.py
+data/*
+*.tar.gz
+*.zip
+
+# Model checkpoints and results
+results/*
+checkpoints/*
+*.pth
+*.pt
+*.ckpt
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs and outputs
+logs/*
+*.log
+wandb/
+runs/
+
+# OS
+# .gitignore
+.github/
+*.tmp
+*.bak
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Config (optional - uncomment if needed)
+# config_local.yaml
+# secrets.json
