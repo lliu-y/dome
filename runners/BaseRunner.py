@@ -274,7 +274,7 @@ class BaseRunner(ABC):
             
             # Save the best model and optimizer
             if self.is_main_process:
-                self.best_model_path = os.path.join(self.config.result.ckpt_path, 'early_stop_model.pth')
+                self.best_model_path = os.path.join(self.config.result.ckpt_path, 'best_model.pth')
                 model_states, optimizer_scheduler_states = self.get_checkpoint_states(stage='epoch_end')
                 model_states['best_val_loss'] = self.best_val_loss
                 model_states['patience_counter'] = self.patience_counter
@@ -284,7 +284,7 @@ class BaseRunner(ABC):
                 torch.save(model_states, self.best_model_path)
                 
                 # Save optimizer and scheduler
-                best_optim_sche_path = os.path.join(self.config.result.ckpt_path, 'early_stop_optim_sche.pth')
+                best_optim_sche_path = os.path.join(self.config.result.ckpt_path, 'best_optim_sche.pth')
                     
                 torch.save(optimizer_scheduler_states, best_optim_sche_path)
                 

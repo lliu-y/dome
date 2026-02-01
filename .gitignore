@@ -50,6 +50,3 @@ venv/
 env/
 ENV/
 
-# Config (optional - uncomment if needed)
-# config_local.yaml
-# secrets.json
