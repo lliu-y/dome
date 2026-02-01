@@ -1,6 +1,12 @@
 """
 统一评估脚本 - 计算 FID, LPIPS, PSNR, SSIM 指标
 
+先生成评估样本:
+python main.py --config configs/A0-Baseline.yaml 
+    --sample_to_eval 
+    --gpu_ids 0 
+    --resume_model results\\anime_colorization\\A0-Baseline\\checkpoint\\early_stop_model.pth         
+
 使用示例:
     python evaluation/evaluate_all.py \
         --result_dir results/A0-Baseline/sample_to_eval/200 \
@@ -87,6 +93,13 @@ def calc_psnr_ssim_batch(result_dir: str, gt_dir: str) -> tuple:
 
 def calc_fid(result_dir: str, gt_dir: str) -> float:
     """调用现有 FID 实现"""
+    import sys
+    from pathlib import Path
+    # 添加项目根目录到 sys.path
+    root_dir = Path(__file__).parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+    
     from evaluation.FID import calc_FID
     return calc_FID(result_dir, gt_dir)
 
