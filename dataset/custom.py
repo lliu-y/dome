@@ -321,8 +321,8 @@ class AnimeColorizationDataset(Dataset):
         
         # 返回dict格式
         return {
-            'GT': color_tensor,           # [3, H, W] 目标彩图 (y in BBDM)
-            'lineart': sketch_tensor,     # [1, H, W] 线稿 (条件)
-            'distorted': distorted_tensor, # [3, H, W] 参考图 (TPS变形后)
+            'GT': color_tensor,           # [3, H, W] 目标彩图 (x0 in BBDM, 要重建的终点)
+            'lineart': sketch_tensor,     # [1, H, W] 线稿 (repeat后作为y, 布朗桥起点)
+            'distorted': distorted_tensor, # [3, H, W] 参考图 (A1: ref=GT, A3: TPS变形)
             'name': Path(filename).stem,  # 文件名 (无扩展名)
         }

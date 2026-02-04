@@ -38,6 +38,16 @@ class BrownianBridgeModel(nn.Module):
         self.condition_key = model_params.UNetParams.condition_key
 
         self.denoise_fn = UNetModel(**vars(model_params.UNetParams))
+        
+        # 参考图编码器 (A1+使用, A0为None)
+        self.ref_encoder = None
+        if hasattr(model_config, 'RefEncoderParams') and model_config.RefEncoderParams is not None:
+            from model.BrownianBridge.ReferenceEncoder import ReferenceEncoder
+            ref_params = model_config.RefEncoderParams
+            self.ref_encoder = ReferenceEncoder(
+                in_channels=getattr(ref_params, 'in_channels', 3),
+                feature_dim=getattr(ref_params, 'feature_dim', 256)
+            )
 
     def register_schedule(self):
         T = self.num_timesteps
@@ -83,13 +93,26 @@ class BrownianBridgeModel(nn.Module):
         return self
 
     def get_parameters(self):
-        return self.denoise_fn.parameters()
+        params = list(self.denoise_fn.parameters())
+        if self.ref_encoder is not None:
+            params += list(self.ref_encoder.parameters())
+        return params
 
-    def forward(self, x, y, context=None):
+    def forward(self, x, y, ref=None, context=None):
+        """
+        Args:
+            x: [B, 3, H, W] 目标图像（GT）
+            y: [B, 3, H, W] 线稿repeat(3)
+            ref: [B, 3, H, W] 参考图（A1+使用，A0为None）
+            context: [B, M, C] 参考图特征（可选，优先级高于ref）
+        """
+        # A1: 若提供ref但未提供context，则用编码器生成context
+        if ref is not None and context is None and self.ref_encoder is not None:
+            context = self.ref_encoder(ref)
+        
+        # condition_key控制是否使用context
         if self.condition_key == "nocond":
             context = None
-        else:
-            context = y if context is None else context
         b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
@@ -97,19 +120,26 @@ class BrownianBridgeModel(nn.Module):
 
     def p_losses(self, x0, y, context, t, noise=None):
         """
-        model loss
-        :param x0: encoded x_ori, E(x_ori) = x0
-        :param y: encoded y_ori, E(y_ori) = y
-        :param y_ori: original source domain image
-        :param t: timestep
-        :param noise: Standard Gaussian Noise
-        :return: loss
+        布朗桥训练损失计算
+        
+        Args:
+            x0: [B, 3, H, W] 目标图像（Ground Truth，布朗桥终点，t→0时重建）
+            y: [B, 3, H, W] 条件图像（线稿repeat(3)，布朗桥起点，t→T时到达）
+            context: [B, M, C] 参考图特征（A0为None，A1+使用CrossAttn）
+            t: [B] 时间步
+            noise: [B, 3, H, W] 高斯噪声（默认随机采样）
+        Returns:
+            loss: 标量损失
+            log_dict: 包含x0_recon等调试信息
         """
         b, c, h, w = x0.shape
         noise = default(noise, lambda: torch.randn_like(x0))
 
         x_t, objective = self.q_sample(x0, y, t, noise)
-        objective_recon = self.denoise_fn(x_t, timesteps=t, context=context)
+        
+        # concat x_t 和 y（线稿）作为结构条件输入
+        x_input = torch.cat([x_t, y], dim=1)  # [B, 6, H, W]
+        objective_recon = self.denoise_fn(x_input, timesteps=t, context=context)
 
         if self.loss_type == 'l1':
             recloss = (objective - objective_recon).abs().mean()
@@ -171,9 +201,13 @@ class BrownianBridgeModel(nn.Module):
     @torch.no_grad()
     def p_sample(self, x_t, y, context, i, clip_denoised=False):
         b, *_, device = *x_t.shape, x_t.device
+        
+        # concat x_t 和 y（线稿）作为结构条件输入
+        x_input = torch.cat([x_t, y], dim=1)  # [B, 6, H, W]
+        
         if self.steps[i] == 0:
             t = torch.full((x_t.shape[0],), self.steps[i], device=x_t.device, dtype=torch.long)
-            objective_recon = self.denoise_fn(x_t, timesteps=t, context=context)
+            objective_recon = self.denoise_fn(x_input, timesteps=t, context=context)
             x0_recon = self.predict_x0_from_objective(x_t, y, t, objective_recon=objective_recon)
             if clip_denoised:
                 x0_recon.clamp_(-1., 1.)
@@ -182,7 +216,7 @@ class BrownianBridgeModel(nn.Module):
             t = torch.full((x_t.shape[0],), self.steps[i], device=x_t.device, dtype=torch.long)
             n_t = torch.full((x_t.shape[0],), self.steps[i+1], device=x_t.device, dtype=torch.long)
 
-            objective_recon = self.denoise_fn(x_t, timesteps=t, context=context)
+            objective_recon = self.denoise_fn(x_input, timesteps=t, context=context)
             x0_recon = self.predict_x0_from_objective(x_t, y, t, objective_recon=objective_recon)
             if clip_denoised:
                 x0_recon.clamp_(-1., 1.)

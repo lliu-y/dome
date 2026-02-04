@@ -111,4 +111,4 @@ model:
         resblock_updown: True
         use_spatial_transformer: False
         context_dim:
-        condition_key: "SpatialRescaler"  # 条件注入方式 {"SpatialRescaler", "first_stage", "nocond"}
+        condition_key: "nocond"  # A0: 仅concat，不使用context

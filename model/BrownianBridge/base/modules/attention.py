@@ -173,7 +173,12 @@ class CrossAttention(nn.Module):
 
         q = self.to_q(x)
         if context is not None:
-            context = rearrange(context, 'b c h w -> b (h w) c')
+            # 兼容两种context格式:
+            # - [B, C, H, W] (4维特征图) -> 展平为 [B, H*W, C]
+            # - [B, M, C] (3维序列) -> 直接使用
+            if context.dim() == 4:
+                context = rearrange(context, 'b c h w -> b (h w) c')
+            # 3维已经是 [B, M, C] 格式，无需处理
         context = default(context, x)
         k = self.to_k(context)
         v = self.to_v(context)

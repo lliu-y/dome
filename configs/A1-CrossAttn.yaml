@@ -1,0 +1,115 @@
+# A1-CrossAttn: A0 + 参考图Cross-Attention注入（ref=GT, 仅middle block）
+# 消融实验: 验证参考图条件注入的有效性
+
+runner: "BBDMRunner"
+
+training:
+  n_epochs: 100
+  n_steps: 400000
+  save_interval: 5
+  sample_interval: 2
+  validation_interval: 4
+  accumulate_grad_batches: 4
+  
+  early_stopping:
+    enabled: True
+    patience: 3
+    min_delta: 0.0
+
+testing:
+  clip_denoised: True
+  sample_num: 1
+
+data:
+  dataset_name: 'anime_colorization'
+  dataset_type: 'anime_colorization'
+  dataset_config:
+    dataset_path: 'dataset'
+    image_size: 256
+    channels: 3
+    to_normal: True
+    flip: False
+    use_tps: False                # A1: 不启用TPS，ref=GT
+    tps_scale: 0.2
+  train:
+    batch_size: 1  
+    shuffle: True
+  val:
+    batch_size: 4 
+    shuffle: True
+  test:
+    batch_size: 4 
+
+model:
+  model_name: "A1-CrossAttn"      # 结果保存路径
+  model_type: "BBDM"
+  latent_before_quant_conv: False
+  normalize_latent: False
+  only_load_latent_mean_std: False
+
+  EMA:
+    use_ema: True
+    ema_decay: 0.995
+    update_ema_interval: 8
+    start_ema_step: 30000
+
+  CondStageParams:
+    n_stages: 2
+    in_channels: 3
+    out_channels: 3
+
+  # 新增: 参考图编码器配置
+  RefEncoderParams:
+    in_channels: 3
+    feature_dim: 256
+
+  BB:
+    optimizer:
+      weight_decay: 0.000
+      optimizer: 'Adam'
+      lr: 1.e-4
+      beta1: 0.9
+
+    lr_scheduler:
+      type: 'CosineAnnealingLR'
+      T_max: -1
+      eta_min: 5.e-7
+
+    params:
+      mt_type: 'linear'
+      objective: 'grad'
+      loss_type: 'l1'
+
+      skip_sample: True
+      sample_type: 'linear'
+      sample_step: 200
+
+      num_timesteps: 1000
+      eta: 1.0
+      max_var: 1.0
+
+      UNetParams:
+        image_size: 256
+        in_channels: 6            # 保持与A0一致 (x_t:3 + L.repeat:3)
+        model_channels: 128
+        out_channels: 3
+        num_res_blocks: 2
+        attention_resolutions: !!python/tuple
+          - 32
+          - 16
+          - 8
+        channel_mult: !!python/tuple
+          - 1
+          - 2
+          - 4
+          - 8
+        conv_resample: True
+        dims: 2
+        num_heads: 8
+        num_head_channels: 64
+        use_scale_shift_norm: True
+        resblock_updown: True
+        use_spatial_transformer: True    # ✅ A1启用！
+        transformer_depth: 1              # middle block插1层
+        context_dim: 256                  # 参考图编码维度
+        condition_key: "crossattn"        # ✅ A1使用crossattn

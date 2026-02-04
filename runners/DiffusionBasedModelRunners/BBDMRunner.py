@@ -42,12 +42,12 @@ class BBDMRunner(DiffusionBaseRunner):
 
     def _prepare_cond(self, lineart):
         """
-        准备条件输入：将线稿转换为布朗桥起点 x_0
+        准备条件输入：将线稿转换为布朗桥起点 y（采样端点）
         
         Args:
             lineart: [B, C, H, W] 线稿，C=1或3
         Returns:
-            x_cond: [B, 3, H, W] 布朗桥起点
+            y_cond: [B, 3, H, W] 布朗桥起点（采样时从此出发，t→T时到达）
         """
         if lineart.shape[1] == 1:
             # 1通道灰度线稿，repeat为3通道
@@ -241,9 +241,9 @@ class BBDMRunner(DiffusionBaseRunner):
             ref = ref.to(self.config.training.device[0])
 
         # 前向传播计算损失
-        # A0阶段: net(x, x_cond) - 原始BBDM
-        # A1+阶段: 需要修改模型forward支持ref
-        loss, additional_info = net(x, x_cond)
+        # A0: ref=None, condition_key="nocond", context被忽略
+        # A1+: ref=参考图, 模型内部自动编码为context
+        loss, additional_info = net(x, x_cond, ref=ref)
         
         if write and self.is_main_process:
             self.writer.add_scalar(f'loss/{stage}', loss, step)

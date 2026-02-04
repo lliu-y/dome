@@ -738,8 +738,9 @@ class UNetModel(nn.Module):
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
 
-        if self.condition_key != 'nocond':
-            x = th.cat([x, context], dim=1)
+        # 注意: x已经在BrownianBridgeModel中完成concat(x_t, y)
+        # context仅用于cross-attention (condition_key="crossattn"时)
+        # condition_key="nocond"时，context会被设为None
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
