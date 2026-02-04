@@ -286,7 +286,13 @@ class BBDMRunner(DiffusionBaseRunner):
         #                  writer_tag=f'{stage}_one_step_sample' if stage != 'test' else None)
         #
         # sample = samples[-1]
-        sample = net.sample(x_cond, clip_denoised=self.config.testing.clip_denoised).to('cpu')
+        
+        # 生成 context（A1: 用参考图编码特征，A0: None）
+        context = None
+        if ref is not None and hasattr(net, 'ref_encoder') and net.ref_encoder is not None:
+            context = net.ref_encoder(ref[0:batch_size])
+        
+        sample = net.sample(x_cond, context=context, clip_denoised=self.config.testing.clip_denoised).to('cpu')
         image_grid = get_image_grid(sample, grid_size, to_normal=self.config.data.dataset_config.to_normal)
         im = Image.fromarray(image_grid)
         im.save(os.path.join(sample_path, 'skip_sample.png'))

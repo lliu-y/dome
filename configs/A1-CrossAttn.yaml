@@ -32,7 +32,7 @@ data:
     use_tps: False                # A1: 不启用TPS，ref=GT
     tps_scale: 0.2
   train:
-    batch_size: 1  
+    batch_size: 4  
     shuffle: True
   val:
     batch_size: 4 

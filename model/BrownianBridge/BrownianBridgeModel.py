@@ -236,10 +236,10 @@ class BrownianBridgeModel(nn.Module):
 
     @torch.no_grad()
     def p_sample_loop(self, y, context=None, clip_denoised=True, sample_mid_step=False):
+        # A0: condition_key="nocond" 强制 context=None
+        # A1: condition_key="crossattn" 使用传入的 context（由 Runner 提供）
         if self.condition_key == "nocond":
             context = None
-        else:
-            context = y if context is None else context
 
         if sample_mid_step:
             imgs, one_step_imgs = [y], []
