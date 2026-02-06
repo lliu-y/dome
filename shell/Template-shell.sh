@@ -106,3 +106,28 @@ python preprocess_and_evaluation.py -f copy_samples \
 # cp results/anime_colorization/A0-Baseline/sample_to_eval/200/*.png comparison/A0/
 # cp results/anime_colorization/A1-CrossAttn/sample_to_eval/200/*.png comparison/A1/
 # cp dataset/test/color/*.png comparison/GT/
+
+
+#autodl 训练相关
+
+# 关闭默认的 tensorboard
+ps -ef | grep tensorboard | awk '{print $2}' | xargs kill -9
+#启动 tensorboard
+tensorboard --port 6007 --logdir xxx
+
+#自动关闭
+
+# 假设您的程序原执行命令为
+python train.py
+# 那么可以在您的程序后跟上shutdown命令
+python train.py; /usr/bin/shutdown      # 用;拼接意味着前边的指令不管执行成功与否，都会执行shutdown命令
+python train.py && /usr/bin/shutdown    # 用&&拼接表示前边的命令执行成功后才会执行shutdown。请根据自己的需要选择
+
+#使用screen
+# 创建一个新的screen会话，命名为my_session
+screen -S my_session
+# 在screen会话中执行训练命令, 并输出到日志文件
+python train.py > train.log 2>&1
+# 退出screen会话（按Ctrl + A + D）
+# 实时查看日志文件
+tail -f train.log

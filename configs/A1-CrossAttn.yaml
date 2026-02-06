@@ -113,3 +113,4 @@ model:
         transformer_depth: 1              # middle block插1层
         context_dim: 256                  # 参考图编码维度
         condition_key: "crossattn"        # ✅ A1使用crossattn
+        spatial_transformer_only_middle: True  # ✅ 仅middle block用CrossAttn

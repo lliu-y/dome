@@ -470,6 +470,7 @@ class UNetModel(nn.Module):
         n_embed=None,                     # custom support for prediction of discrete ids into codebook of first stage vq model
         legacy=True,
         condition_key="concat",
+        spatial_transformer_only_middle=False,  # True: 仅middle block使用SpatialTransformer
     ):
         super().__init__()
         if use_spatial_transformer:
@@ -552,6 +553,8 @@ class UNetModel(nn.Module):
                     if legacy:
                         #num_heads = 1
                         dim_head = ch // num_heads if use_spatial_transformer else num_head_channels
+                    # spatial_transformer_only_middle: input/output blocks用AttentionBlock
+                    use_st_here = use_spatial_transformer and not spatial_transformer_only_middle
                     layers.append(
                         AttentionBlock(
                             ch,
@@ -559,7 +562,7 @@ class UNetModel(nn.Module):
                             num_heads=num_heads,
                             num_head_channels=dim_head,
                             use_new_attention_order=use_new_attention_order,
-                        ) if not use_spatial_transformer else SpatialTransformer(
+                        ) if not use_st_here else SpatialTransformer(
                             ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
                         )
                     )
@@ -653,6 +656,8 @@ class UNetModel(nn.Module):
                     if legacy:
                         #num_heads = 1
                         dim_head = ch // num_heads if use_spatial_transformer else num_head_channels
+                    # spatial_transformer_only_middle: input/output blocks用AttentionBlock
+                    use_st_here = use_spatial_transformer and not spatial_transformer_only_middle
                     layers.append(
                         AttentionBlock(
                             ch,
@@ -660,7 +665,7 @@ class UNetModel(nn.Module):
                             num_heads=num_heads_upsample,
                             num_head_channels=dim_head,
                             use_new_attention_order=use_new_attention_order,
-                        ) if not use_spatial_transformer else SpatialTransformer(
+                        ) if not use_st_here else SpatialTransformer(
                             ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
                         )
                     )
