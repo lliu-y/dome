@@ -103,10 +103,10 @@ class BrownianBridgeModel(nn.Module):
         Args:
             x: [B, 3, H, W] 目标图像（GT）
             y: [B, 3, H, W] 线稿repeat(3)
-            ref: [B, 3, H, W] 参考图（A1+使用，A0为None）
-            context: [B, M, C] 参考图特征（可选，优先级高于ref）
+            ref: [B, 3, H, W] 参考图（已废弃，请使用context）
+            context: [B, M, C] 参考图特征（由外部BBDMRunner提前编码）
         """
-        # A1: 若提供ref但未提供context，则用编码器生成context
+        # 向后兼容：若提供ref但未提供context，则编码（但推荐由外部提前编码）
         if ref is not None and context is None and self.ref_encoder is not None:
             context = self.ref_encoder(ref)
         

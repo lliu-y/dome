@@ -236,14 +236,16 @@ class BBDMRunner(DiffusionBaseRunner):
         x = gt.to(self.config.training.device[0])
         x_cond = self._prepare_cond(lineart).to(self.config.training.device[0])
         
-        # 如果有参考图，也移动到设备 (A1+阶段使用)
-        if ref is not None:
+        # A1+: 提前编码参考图为context（避免在forward中重复编码）
+        context = None
+        if ref is not None and hasattr(net, 'ref_encoder') and net.ref_encoder is not None:
             ref = ref.to(self.config.training.device[0])
+            context = net.ref_encoder(ref)
 
         # 前向传播计算损失
-        # A0: ref=None, condition_key="nocond", context被忽略
-        # A1+: ref=参考图, 模型内部自动编码为context
-        loss, additional_info = net(x, x_cond, ref=ref)
+        # A0: context=None, condition_key="nocond"
+        # A1+: context=[B,256,256], condition_key="crossattn"
+        loss, additional_info = net(x, x_cond, context=context)
         
         if write and self.is_main_process:
             self.writer.add_scalar(f'loss/{stage}', loss, step)
@@ -335,6 +337,11 @@ class BBDMRunner(DiffusionBaseRunner):
             x = gt.to(self.config.training.device[0])
             x_cond = self._prepare_cond(lineart).to(self.config.training.device[0])
             
+            # A1+: 提前编码参考图为context
+            context = None
+            if ref is not None and hasattr(net, 'ref_encoder') and net.ref_encoder is not None:
+                context = net.ref_encoder(ref.to(self.config.training.device[0]))
+            
             # 获取文件名列表
             if isinstance(name, (list, tuple)):
                 x_name = name
@@ -342,7 +349,7 @@ class BBDMRunner(DiffusionBaseRunner):
                 x_name = [name] * batch_size if isinstance(name, str) else name
 
             for j in range(sample_num):
-                sample = net.sample(x_cond, clip_denoised=False)
+                sample = net.sample(x_cond, context=context, clip_denoised=False)
                 # sample = net.sample_vqgan(x)
                 for i in range(batch_size):
                     condition = x_cond[i].detach().clone()

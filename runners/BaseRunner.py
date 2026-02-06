@@ -660,7 +660,7 @@ class BaseRunner(ABC):
                         )
 
                     with torch.no_grad():
-                        if self.global_step % 50 == 0:
+                        if self.global_step % 100 == 0:
                             val_batch = next(iter(val_loader))
                             self.validation_step(val_batch=val_batch, epoch=epoch, step=self.global_step)
 
