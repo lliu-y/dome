@@ -62,6 +62,14 @@ model:
     in_channels: 3
     out_channels: 3
 
+  # 新增: 参考图编码器配置
+  RefEncoderParams:
+    in_channels: 3
+    feature_dim: 256
+    # Reference Dropout (Classifier-Free Guidance 训练策略)
+    reference_dropout_enabled: True   # 启用/禁用 dropout
+    reference_dropout_prob: 0.1       # dropout 概率 (推荐 0.1-0.2)
+    
   BB:
     optimizer:
       weight_decay: 0.000

@@ -242,20 +242,25 @@ class BBDMRunner(DiffusionBaseRunner):
             ref = ref.to(self.config.training.device[0])
             context = net.ref_encoder(ref)
             
-            # Reference Dropout (10%概率): Classifier-Free Guidance 训练策略
+            # Reference Dropout (Classifier-Free Guidance 训练策略)
             # 关键改进:
-            # 1. 样本级别dropout (已实现): 每个样本独立决定是否drop，批次内混合状态
-            # 2. 可学习null_embed (新增): 用语义中性的embedding替代零向量
+            # 1. 样本级别dropout: 每个样本独立决定是否drop，批次内混合状态
+            # 2. 可学习null_embed: 用语义中性的embedding替代零向量
             if stage == 'train':
-                drop_prob = 0.1
-                # drop_mask: [B, 1, 1] -> 广播到 [B, M, C]，每个样本独立drop
-                drop_mask = torch.rand(context.shape[0], 1, 1, device=context.device) < drop_prob
+                # 从配置读取 dropout 开关和概率（安全检查：RefEncoderParams 可能不存在）
+                ref_params = getattr(self.config.model, 'RefEncoderParams', None)
+                ref_dropout_enabled = getattr(ref_params, 'reference_dropout_enabled', True) if ref_params else False
+                ref_dropout_prob = getattr(ref_params, 'reference_dropout_prob', 0.1) if ref_params else 0.0
                 
-                # 获取可学习的"无条件"嵌入 (优于零向量)
-                null_context = net.ref_encoder.get_null_context(context.shape[0])
-                
-                # 使用torch.where替换: drop的样本用null_embed，保留的用真实context
-                context = torch.where(drop_mask, null_context, context)
+                if ref_dropout_enabled and ref_dropout_prob > 0:
+                    # drop_mask: [B, 1, 1] -> 广播到 [B, M, C]，每个样本独立drop
+                    drop_mask = torch.rand(context.shape[0], 1, 1, device=context.device) < ref_dropout_prob
+                    
+                    # 获取可学习的"无条件"嵌入 (优于零向量)
+                    null_context = net.ref_encoder.get_null_context(context.shape[0])
+                    
+                    # 使用torch.where替换: drop的样本用null_embed，保留的用真实context
+                    context = torch.where(drop_mask, null_context, context)
 
         # 前向传播计算损失
         # A0: context=None, condition_key="nocond"
