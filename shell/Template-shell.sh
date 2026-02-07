@@ -113,7 +113,7 @@ python preprocess_and_evaluation.py -f copy_samples \
 # 关闭默认的 tensorboard
 ps -ef | grep tensorboard | awk '{print $2}' | xargs kill -9
 #启动 tensorboard
-tensorboard --port 6007 --logdir xxx
+tensorboard --port 6007 --logdir results/anime_colorization/A1-CrossAttn/log/
 
 #自动关闭
 

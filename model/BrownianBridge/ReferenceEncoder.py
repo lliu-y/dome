@@ -42,6 +42,11 @@ class ReferenceEncoder(nn.Module):
             nn.SiLU(),
         )
         
+        # 可学习的"无条件"嵌入 (用于Classifier-Free Guidance训练)
+        # 在特征空间中学习一个语义中性的点，表示"无参考图"状态
+        # 形状: [1, num_tokens, feature_dim]，其中num_tokens = 16*16 = 256
+        self.null_embed = nn.Parameter(torch.randn(1, 256, feature_dim) * 0.01)
+        
     def forward(self, ref_image):
         """
         Args:
@@ -54,3 +59,14 @@ class ReferenceEncoder(nn.Module):
         # 展平为序列格式，符合Cross-Attention输入要求
         context = features.view(B, C, H * W).permute(0, 2, 1)  # [B, M, C]
         return context
+    
+    def get_null_context(self, batch_size):
+        """
+        返回用于无条件生成的null embedding
+        
+        Args:
+            batch_size: 批次大小
+        Returns:
+            null_context: [B, M, feature_dim] 无条件嵌入
+        """
+        return self.null_embed.expand(batch_size, -1, -1)

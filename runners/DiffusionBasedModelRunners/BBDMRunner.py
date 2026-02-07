@@ -241,10 +241,25 @@ class BBDMRunner(DiffusionBaseRunner):
         if ref is not None and hasattr(net, 'ref_encoder') and net.ref_encoder is not None:
             ref = ref.to(self.config.training.device[0])
             context = net.ref_encoder(ref)
+            
+            # Reference Dropout (10%概率): Classifier-Free Guidance 训练策略
+            # 关键改进:
+            # 1. 样本级别dropout (已实现): 每个样本独立决定是否drop，批次内混合状态
+            # 2. 可学习null_embed (新增): 用语义中性的embedding替代零向量
+            if stage == 'train':
+                drop_prob = 0.1
+                # drop_mask: [B, 1, 1] -> 广播到 [B, M, C]，每个样本独立drop
+                drop_mask = torch.rand(context.shape[0], 1, 1, device=context.device) < drop_prob
+                
+                # 获取可学习的"无条件"嵌入 (优于零向量)
+                null_context = net.ref_encoder.get_null_context(context.shape[0])
+                
+                # 使用torch.where替换: drop的样本用null_embed，保留的用真实context
+                context = torch.where(drop_mask, null_context, context)
 
         # 前向传播计算损失
         # A0: context=None, condition_key="nocond"
-        # A1+: context=[B,256,256], condition_key="crossattn"
+        # A1+: context=[B,M,C], condition_key="crossattn" (10% dropout训练)
         loss, additional_info = net(x, x_cond, context=context)
         
         if write and self.is_main_process:

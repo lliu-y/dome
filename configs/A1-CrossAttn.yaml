@@ -110,7 +110,7 @@ model:
         use_scale_shift_norm: True
         resblock_updown: True
         use_spatial_transformer: True    # ✅ A1启用！
-        transformer_depth: 1              # middle block插1层
+        transformer_depth: 1              # 每层插1个transformer block
         context_dim: 256                  # 参考图编码维度
         condition_key: "crossattn"        # ✅ A1使用crossattn
-        spatial_transformer_only_middle: True  # ✅ 仅middle block用CrossAttn
+        spatial_transformer_only_middle: False  # ✅ 全层都用CrossAttn（多尺度注入）
